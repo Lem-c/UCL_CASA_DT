@@ -2,11 +2,13 @@ from util import DataBase
 from util import XGBModel
 
 if __name__ == "__main__":
-    db = DataBase.DataBase("./data/raw/COVID-19-daily-admissions-and-beds-20220512-211001-220331-v2.xlsx",
-                           "./data/raw/Final_EMHP_wastewater_data_24022022-1.ods")
+    db = DataBase.DataBase("",
+                           './data/London_agg.xlsx')
+    df_train, df_test = db.get_train_test_split()
 
-    db.pivot_df("england")
-    df = db.get_main_df()
+    print(df_train)
+    print("\n\n")
+    print(df_test)
 
-    model = XGBModel.XGB(df)
-    model.train()
+    xgb = XGBModel.XGB(df_train, df_test, db.get_main_df())
+    xgb.train_lgb()

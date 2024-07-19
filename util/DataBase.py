@@ -19,14 +19,14 @@ class DataBase:
         # print tool
         self.log = Logger(__name__).get_logger()
 
-        if sheet_var is None:
-            NotImplementedError()
+        if len(df_vir) < 1 or sheet_var is None:
+            self.df_main = pd.read_excel(df_ww)
+        else:
+            self.df_vir = pd.read_excel(df_vir, sheet_name=sheet_var, skiprows=12)
+            self.df_ww = pd.read_excel(df_ww, sheet_name=sheet_ww, engine='odf', skiprows=7, header=0)
 
-        self.df_vir = pd.read_excel(df_vir, sheet_name=sheet_var, skiprows=12)
-        self.df_ww = pd.read_excel(df_ww, sheet_name=sheet_ww, engine='odf', skiprows=7, header=0)
-
-        self.setHeader()
-        self.getDataInfo()
+            self.setHeader()
+            self.getDataInfo()
 
     def setHeader(self):
         """
@@ -93,6 +93,23 @@ class DataBase:
         # merge england data
         self.df_main = pd.merge(pivoted_ww_target, pivoted_vir_target, on='index', how='inner')
         # self.df_main.to_csv("main.csv")
+
+    def get_train_test_split(self) -> object:
+        df_temp = self.df_main
+        # Convert the date column to datetime format
+        df_temp['date'] = pd.to_datetime(self.df_main['date'])
+
+        # Sort the dataset by date
+        data = df_temp.sort_values(by='date')
+
+        # Calculate the 80% point
+        split_point = int(len(data) * 0.8)
+
+        # Split the dataset into training and testing sets
+        train_set = data.iloc[:split_point]
+        test_set = data.iloc[split_point:]
+
+        return train_set, test_set
 
     def get_main_df(self):
         return self.df_main
