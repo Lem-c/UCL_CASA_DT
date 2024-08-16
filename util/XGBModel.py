@@ -1,10 +1,11 @@
 import pandas as pd
 import numpy as np
+import seaborn as sns
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import mean_absolute_error, r2_score
 from xgboost import XGBRegressor
 from lightgbm import LGBMRegressor
-from sklearn.svm import SVR
+from sklearn.model_selection import cross_val_score, KFold, GroupKFold
 import matplotlib.pyplot as plt
 from matplotlib.axis import Axis
 from sklearn.preprocessing import StandardScaler
@@ -68,12 +69,13 @@ class XGB:
 
         # Prepare the data
         self.all_variables = ['sars_cov2_gc_l_mean', 'suspended_solids_mg_l', 'ammonia_mg_l', 'ophosph_mg_l',
-                         'sample_ph_pre_ansis', 'raw_ansis_sars_repc_std', 'grab_compo_boo', 'sars_below_lod',
-                         'sars_below_loq', 'reception_delay', 'catchment_population_ons_mid_2019',
-                         'catchment_area', 'catch_in_cis_prop', 'catch_cis_population']
+                              'sample_ph_pre_ansis', 'raw_ansis_sars_repc_std', 'grab_compo_boo', 'sars_below_lod',
+                              'sars_below_loq', 'reception_delay', 'catchment_population_ons_mid_2019',
+                              'catchment_area', 'catch_in_cis_prop', 'catch_cis_population',
+                              'ratio_over_50', 'Ethnicity_Proportion', 'imd_score']
 
         # Define target variable
-        self.target_variable = 'median_prob'
+        self.target_variable = 'infection_rate'
 
         self.X = self.df[self.all_variables]
         self.y = self.df[self.target_variable]
@@ -93,6 +95,10 @@ class XGB:
             self.inverse_transform_y = lambda x: 10 ** x - target_offset
         else:
             raise ValueError('y_scale must be linear or log')
+
+        print("Mean values:\n", self.df['imd_score'].mean())
+        print("\nMedian values:\n", self.df['imd_score'].median())
+        print("\nMin values:\n", self.df['imd_score'].min())
 
         self.inverse_transform_x = dict()
         self.input_offset = input_offset
@@ -144,15 +150,58 @@ class XGB:
         self.y = pd.concat([y_train, y_test])
         return x_train, x_test, y_train, y_test
 
-    def train_xgb(self, is_date_split=False):
+    def train_xgb(self, is_date_split=False, is_spatial_split=False):
 
-        if is_date_split :
+        if is_date_split:
+            X_all, y_all = self.log10_transform()
 
-            X = self.df_train[self.all_variables]
-            y = self.df_train[self.target_variable]
+            X_all = pd.concat([X_all, y_all], axis=1)
+            df_temp = X_all
+            # Convert the date column to datetime format
+            df_temp['date'] = pd.to_datetime(self.df['date'])
 
-            X_test = self.df_test[self.all_variables]
-            y_test = self.df_test[self.target_variable]
+            # Sort the dataset by date
+            data = df_temp.sort_values(by='date')
+
+            # Calculate the 80% point
+            split_point = int(len(data) * 0.8)
+
+            # Split the dataset into training and testing sets
+            train_set = data.iloc[:split_point]
+            test_set = data.iloc[split_point:]
+
+            X = train_set[self.all_variables]
+            y = train_set[self.target_variable]
+
+            X_test = test_set[self.all_variables]
+            y_test = test_set[self.target_variable]
+
+            # Handle any missing values by filling with the mean of the column
+            X.fillna(X.mean(), inplace=True)
+            y.fillna(y.mean(), inplace=True)
+            X_test.fillna(X_test.mean(), inplace=True)
+            y_test.fillna(y_test.mean(), inplace=True)
+
+        if is_spatial_split:
+
+            X_all, y_all = self.log10_transform()
+            # X_all, y_all = self.X, self.y
+
+            group_kfold = GroupKFold(n_splits=5)
+            groups = self.df['CIS20CD']
+            # Performing the split
+            splits = list(group_kfold.split(X_all, y_all, groups=groups))
+            X_all = pd.concat([X_all, y_all], axis=1)
+            # Display the indices for one of the splits to demonstrate
+            train_indices, test_indices = splits[0]
+            train_set = X_all.iloc[train_indices]
+            test_set = X_all.iloc[test_indices]
+
+            X = train_set[self.all_variables]
+            y = train_set[self.target_variable]
+
+            X_test = test_set[self.all_variables]
+            y_test = test_set[self.target_variable]
 
             # Handle any missing values by filling with the mean of the column
             X.fillna(X.mean(), inplace=True)
@@ -200,13 +249,34 @@ class XGB:
         best_model = XGBRegressor(**best_params)
         best_model.fit(X, y)
 
+        # Cross-validation
+        kf = KFold(n_splits=5, shuffle=True, random_state=42)
+        cv_scores = cross_val_score(best_model, X, y, cv=kf, scoring='neg_mean_absolute_error')
+
+        print("Cross-Validation MAE Scores: ", -cv_scores)
+        print("Mean CV MAE: ", -cv_scores.mean())
+        print("Standard Deviation of CV MAE: ", cv_scores.std())
+
         # Evaluate the model
         y_pred = best_model.predict(X_test)
-        mse = mean_squared_error(y_test, y_pred)
+        mae = mean_absolute_error(y_test, y_pred)
         r2 = r2_score(y_test, y_pred)
 
-        print(f"Mean Squared Error: {mse}")
+        self.plot_with_intervals(X_test, y_test, y_pred)
+
+        print(f"Mean Absolute Error: {mae}")
         print(f"R-squared: {r2}")
+
+        # Create box plot of cross-validated MAE scores
+        cv_results = random_search.cv_results_
+        mae_scores = -cv_results['mean_test_score']
+
+        # Create a box plot
+        plt.figure(figsize=(10, 6))
+        sns.boxplot(data=[mae_scores], color='#F4A460')
+        plt.title('Mean Absolute Error')
+        plt.ylabel('Mean Absolute Error')
+        plt.show()
 
         # Extracting feature importance
         importances = best_model.feature_importances_
@@ -234,77 +304,6 @@ class XGB:
         ax.set_ylabel(f'Predictions', fontsize=14)
         ax.set_xlabel('True values', fontsize=14)
         plt.savefig('xgb_prediction.png')
-
-    def train_svr(self, is_date_split=False):
-        if is_date_split:
-
-            X = self.df_train[self.all_variables]
-            y = self.df_train[self.target_variable]
-
-            X_test = self.df_test[self.all_variables]
-            y_test = self.df_test[self.target_variable]
-
-            # Handle any missing values by filling with the mean of the column
-            X.fillna(X.mean(), inplace=True)
-            y.fillna(y.mean(), inplace=True)
-            X_test.fillna(X_test.mean(), inplace=True)
-            y_test.fillna(y_test.mean(), inplace=True)
-
-        else:
-
-            X, X_test, y, y_test = self.random_split()
-
-        # Define the parameter grid for RandomizedSearchCV
-        param_grid = {
-            'C': [0.1, 1, 10, 100, 1000],
-            'epsilon': [0.01, 0.1, 0.2, 0.5, 1],
-            'gamma': ['scale', 'auto'] + list(np.logspace(-3, 2, 6))
-        }
-
-        # Initialize the model
-        svr = SVR()
-
-        # Initialize RandomizedSearchCV
-        random_search = RandomizedSearchCV(
-            estimator=svr,
-            param_distributions=param_grid,
-            n_iter=50,
-            scoring='neg_mean_squared_error',
-            cv=3,
-            verbose=1,
-            random_state=42,
-            n_jobs=-1
-        )
-
-        # Fit the random search model
-        random_search.fit(X, y)
-
-        # Get the best parameters
-        best_params = random_search.best_params_
-        print("Best parameters found: ", best_params)
-
-        # Train the model with the best parameters
-        best_model = SVR(**best_params)
-        best_model.fit(X, y)
-
-        # Step 5: Evaluate the model
-        y_pred = best_model.predict(X_test)
-        mse = mean_squared_error(y_test, y_pred)
-        r2 = r2_score(y_test, y_pred)
-
-        print(f"Mean Squared Error: {mse}")
-        print(f"R-squared: {r2}")
-
-        # Since SVR does not provide feature importances, this part is omitted
-
-        # Plot the result
-        fig, ax = plt.subplots(figsize=(8, 6))
-        ax.scatter(y_test, y_pred, edgecolors=(0, 0, 0))
-        ax.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'k--', lw=4)
-        ax.set_xlabel('True values')
-        ax.set_ylabel('Predictions')
-        ax.set_title('SVR Predictions')
-        plt.savefig('svr_prediction.png')
 
     def train_lgb(self, is_date_split=False):
 
@@ -363,7 +362,11 @@ class XGB:
 
         # Evaluate the model
         y_pred = best_model.predict(X_test)
-        mse = mean_squared_error(y_test, y_pred)
+        print(y_pred)
+        valid_idx = ~np.isnan(y_test) & ~np.isnan(y_pred)
+        y_test_clean = y_test[valid_idx]
+        y_pred_clean = y_pred[valid_idx]
+        mse = mean_absolute_error(y_test_clean, y_pred_clean)
         r2 = r2_score(y_test, y_pred)
 
         print(f"Mean Squared Error: {mse}")
@@ -395,3 +398,33 @@ class XGB:
         ax.set_ylabel(f'Predictions', fontsize=14)
         ax.set_xlabel('True values', fontsize=14)
         plt.savefig('lgb_prediction.png')
+
+    def plot_with_intervals(self, test_x, true_y, pred_y):
+        x = test_x['sars_cov2_gc_l_mean']
+        true_y = true_y
+        predict_y = pred_y
+
+        print(x.shape, true_y.shape)
+
+        # # Calculate confidence intervals
+        # lower_90 = np.percentile(true_y, 5)
+        # upper_90 = np.percentile(true_y, 95)
+        # lower_50 = np.percentile(true_y, 25)
+        # upper_50 = np.percentile(true_y, 75)
+
+        plt.figure(figsize=(10, 10))
+
+        # Scatter plot of true values
+        plt.scatter(x, true_y, color='lightgreen', label='True values')
+
+        # Scatter plot of predicted values
+        plt.scatter(x, predict_y, color='red', label='Predicted values', marker='x')
+
+        # Add labels and title
+        plt.xlabel('RNA concentration (x)')
+        plt.ylabel('Values')
+        plt.legend()
+
+        # Show the plot
+        plt.show()
+
