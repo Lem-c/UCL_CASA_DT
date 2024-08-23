@@ -209,8 +209,7 @@ class XGB:
             X_test.fillna(X_test.mean(), inplace=True)
             y_test.fillna(y_test.mean(), inplace=True)
 
-        else:
-
+        if not is_spatial_split and not is_date_split:
             X, X_test, y, y_test = self.random_split()
 
         # Train the model
@@ -427,4 +426,84 @@ class XGB:
 
         # Show the plot
         plt.show()
+
+    def plot_split_df_table(self):
+        import seaborn as sns
+        from matplotlib.colors import ListedColormap
+
+        # Prepare the data for plotting
+        self.df['Date'] = pd.to_datetime(self.df['date'])  # Ensure the date column is in datetime format
+        self.df['Formatted Date'] = self.df['Date'].dt.strftime('%d/%m/%y')
+        custom_cmap = ListedColormap(['#98FB98', '#00008B'])  # Light green for test, dark blue for training
+
+        # 1. Random Split
+        self.df['Random Split'] = np.where(np.random.rand(len(self.df)) < 0.7, 'Training', 'Test')
+
+        # 2. Temporal Split (First 70% of days for training, last 30% for testing)
+        self.df = self.df.sort_values('Date')  # Ensure data is sorted by date
+        unique_dates = self.df['Date'].unique()  # Get unique dates
+        temporal_cutoff = int(len(unique_dates) * 0.7)  # Determine the 70% cutoff date
+        cutoff_date = unique_dates[temporal_cutoff]  # Get the cutoff date
+
+        # Assign 'Training' to dates before or on the cutoff date, 'Test' to those after
+        self.df['Temporal Split'] = np.where(self.df['Date'] <= cutoff_date, 'Training', 'Test')
+
+        # 3. Spatial Split
+        unique_regions = self.df['CIS20CD'].unique()
+        train_regions = np.random.choice(unique_regions, size=int(len(unique_regions) * 0.7), replace=False)
+        self.df['Spatial Split'] = np.where(self.df['CIS20CD'].isin(train_regions), 'Training', 'Test')
+
+        # Map the split categories to numerical values for easier plotting
+        split_mapping = {'Training': 1, 'Test': 0}
+        self.df['Random Split (Numeric)'] = self.df['Random Split'].map(split_mapping)
+        self.df['Temporal Split (Numeric)'] = self.df['Temporal Split'].map(split_mapping)
+        self.df['Spatial Split (Numeric)'] = self.df['Spatial Split'].map(split_mapping)
+
+        # Handle duplicates by aggregating (here we take the mean, but you can adjust)
+        df_random_pivot = self.df.pivot_table(index='CIS20CD', columns='Formatted Date',
+                                              values='Random Split (Numeric)', aggfunc='mean').fillna(0)
+        df_temporal_pivot = self.df.pivot_table(index='CIS20CD', columns='Formatted Date',
+                                                values='Temporal Split (Numeric)', aggfunc='mean').fillna(0)
+        df_spatial_pivot = self.df.pivot_table(index='CIS20CD', columns='Formatted Date',
+                                               values='Spatial Split (Numeric)', aggfunc='mean').fillna(0)
+
+        # Ensure date sorting and formatting is consistent
+        df_temporal_pivot = df_temporal_pivot.reindex(
+            columns=sorted(df_temporal_pivot.columns, key=lambda x: pd.to_datetime(x, format='%d/%m/%y')))
+        df_random_pivot = df_random_pivot.reindex(
+            columns=sorted(df_random_pivot.columns, key=lambda x: pd.to_datetime(x, format='%d/%m/%y')))
+        df_spatial_pivot = df_spatial_pivot.reindex(
+            columns=sorted(df_spatial_pivot.columns, key=lambda x: pd.to_datetime(x, format='%d/%m/%y')))
+
+        # Replot with the new date format and custom colors
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6), sharey=True)
+
+        # Corrected pivot usage
+        sns.heatmap(df_random_pivot, ax=axes[0], cmap=custom_cmap, cbar=False)
+        sns.heatmap(df_temporal_pivot, ax=axes[1], cmap=custom_cmap, cbar=False)
+        sns.heatmap(df_spatial_pivot, ax=axes[2], cmap=custom_cmap, cbar=False)
+
+        # Random Split
+        axes[0].set_title('(a) Random Split', fontsize=16)
+        axes[0].set_xlabel('Date')
+        axes[0].set_ylabel('Spatial ID (CIS20CD)')
+        axes[0].set_xticklabels(axes[0].get_xticklabels(), rotation=45)
+
+        # Temporal Split
+        axes[1].set_title('(b) Temporal Split', fontsize=16)
+        axes[1].set_xlabel('Date')
+        axes[1].set_ylabel('')
+        axes[1].set_xticklabels(axes[1].get_xticklabels(), rotation=45)
+
+        # Spatial Split
+        axes[2].set_title('(c) Spatial Split', fontsize=16)
+        axes[2].set_xlabel('Date')
+        axes[2].set_ylabel('')
+        axes[2].set_xticklabels(axes[2].get_xticklabels(), rotation=45)
+
+        plt.tight_layout()
+        plt.show()
+
+
+
 

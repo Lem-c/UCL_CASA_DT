@@ -259,6 +259,12 @@ class DataBase:
         plt.show()
 
     def plot_london_map(self, param='infection_rate'):
+        import geopandas as gpd
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import LinearSegmentedColormap
+        from matplotlib_scalebar.scalebar import ScaleBar
+
         shapefile_path = './data/Covid_Infection_Survey_Dec_2020_UK_BUC/CIS_DEC_2020_UK_BUC.shp'
         gdf = gpd.read_file(shapefile_path)
 
@@ -270,28 +276,68 @@ class DataBase:
         colors = ["#ADD8E6", "#FFA500", "#FF0000"]  # Light blue to red
         n_bins = 100  # Discretizes the interpolation into bins
         cmap_name = 'custom_cmap'
-        from matplotlib.colors import LinearSegmentedColormap
         custom_cmap = LinearSegmentedColormap.from_list(cmap_name, colors, N=n_bins)
 
         # Plot the map
         fig, ax = plt.subplots(1, 1, figsize=(12, 8))
         merged_gdf.plot(column=param, cmap=custom_cmap, ax=ax, legend=True,
-                        legend_kwds={'label': "probability of being infected",
-                                     'orientation': "horizontal"})
-        ax.set_title('London CIS Region Filled with rate of being infected')
+                        legend_kwds={'label': "Probability of being infected",
+                                     'orientation': "horizontal",
+                                     'shrink': 0.5,  # Make the legend smaller
+                                     'pad': 0.02,  # Adjust padding between the map and the legend
+                                     'fraction': 0.05},
+                        edgecolor='black')  # Adjust the fraction of the axes area used by the legend
+        ax.set_title('London CIS Region Filled with Rate of Being Infected')
+
+        # Remove x/y axis numbers
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        # Add North arrow outside of map
+        x, y, arrow_length = 0.1, 0.95, 0.1
+        ax.annotate('N', xy=(x, y), xytext=(x, y - arrow_length),
+                    arrowprops=dict(facecolor='black', width=5, headwidth=15),
+                    ha='center', va='center', fontsize=20,
+                    xycoords=ax.transAxes)  # Use ax.transAxes to place relative to axes
+
+        # Add scale bar inside the map, but positioned at the lower right
+        scalebar = ScaleBar(1, location='lower right', pad=0.5)
+        ax.add_artist(scalebar)
+
         ax.set_axis_off()
         plt.show()
 
     def plot_correction(self):
+        import seaborn as sns
+        import matplotlib.pyplot as plt
+        import numpy as np
+
         # Select only numeric columns
         numeric_df = self.df_main.select_dtypes(include='number')
-        numeric_df = numeric_df.drop(columns=['reac_vol_control'])
+        numeric_df = numeric_df.drop(columns=['reac_vol_control', 'll', 'ul'])
 
+        # Calculate the correlation matrix
         corr_matrix = numeric_df.corr()
+
+        # Reorder the correlation matrix to move 'infection_rate' to the top and left
+        cols = ['infection_rate'] + [col for col in corr_matrix.columns if col != 'infection_rate']
+        corr_matrix = corr_matrix.loc[cols, cols]
 
         # Plotting the correlation matrix
         plt.figure(figsize=(16, 10))
-        sns.heatmap(corr_matrix, annot=True, fmt='.2f', cmap='coolwarm')
+
+        # Highlight the 'infection_rate' row and column by applying a custom mask
+        mask = np.zeros_like(corr_matrix, dtype=bool)
+        mask[np.arange(len(mask)) == 0, :] = True
+        mask[:, np.arange(len(mask)) == 0] = True
+
+        sns.heatmap(corr_matrix, annot=True, fmt='.2f', cmap='coolwarm', cbar=True,
+                    linewidths=0.5, linecolor='black', mask=mask)
+
+        # Overlay another heatmap without masking to show the full correlation matrix
+        sns.heatmap(corr_matrix, annot=True, fmt='.2f', cmap='coolwarm', cbar=False, linewidths=0.5, linecolor='black',
+                    mask=~mask)
+
         plt.title('Correlation Matrix')
         plt.show()
 
@@ -308,12 +354,13 @@ class DataBase:
                  label='Daily Mean Concentration')
         plt.plot(temp_df['date'], temp_df['sars_cov2_gc_l_mean_ma'], marker='', linestyle='-', color='r',
                  label='7-Day Moving Average')
-        plt.title('Trend of SARS-CoV-2 Concentration Over Time')
-        plt.xlabel('Date')
-        plt.ylabel('SARS-CoV-2 Concentration (gc/l mean)')
+        plt.title('Trend of SARS-CoV-2 Concentration Over Time', fontsize=16)
+        plt.xlabel('Date', fontsize=14)
+        plt.ylabel('SARS-CoV-2 Concentration (gc/l mean)', fontsize=14)
         plt.grid(True)
-        plt.xticks(rotation=45)
-        plt.legend()
+        plt.xticks(rotation=45, fontsize=12)
+        plt.yticks(fontsize=12)
+        plt.legend(fontsize=14)
         plt.tight_layout()
         plt.show()
 
@@ -340,6 +387,12 @@ class DataBase:
         plt.show()
 
     def plot_imd(self, london_isoa):
+        import geopandas as gpd
+        import pandas as pd
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+        from matplotlib_scalebar.scalebar import ScaleBar
+
         # Load shapefile
         lsoa_gdf = gpd.read_file(london_isoa)
 
@@ -351,7 +404,13 @@ class DataBase:
 
         # Plot the map
         fig, ax = plt.subplots(1, 1, figsize=(15, 15))
-        merged_gdf.plot(column="imd_score", cmap="OrRd", linewidth=0.8, ax=ax, edgecolor="0.8", legend=True)
+        imd_plot = merged_gdf.plot(column="imd_score", cmap="OrRd", linewidth=0.8, ax=ax, edgecolor="0.8", legend=False)
+
+        # Create a colorbar with a smaller font size
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="5%", pad=0.1)
+        cbar = plt.colorbar(imd_plot.get_children()[0], cax=cax)
+        cbar.ax.tick_params(labelsize=10)  # Set the font size of the colorbar ticks
 
         # Add unique LA code annotations
         plotted_labels = set()
@@ -362,11 +421,25 @@ class DataBase:
                              horizontalalignment='center', fontsize=8, color='black')
                 plotted_labels.add(la_code)
 
+        # Remove x/y axis numbers
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        # Add North arrow
+        x, y, arrow_length = 0.05, 0.95, 0.1
+        ax.annotate('N', xy=(x, y), xytext=(x, y - arrow_length),
+                    arrowprops=dict(facecolor='black', width=5, headwidth=15),
+                    ha='center', va='center', fontsize=20, xycoords=ax.transAxes)
+
+        # Add scale bar
+        scalebar = ScaleBar(1, location='lower left')  # 1 pixel = 1 meter
+        ax.add_artist(scalebar)
+
         plt.title("IMD Score in London")
         plt.show()
 
     def plot_result(self):
-        dimensions = ['Original Data', 'ratio_over_50', 'Ethnicity_Proportion', 'imd_score']
+        dimensions = ['Original Data (OD)', 'OD+ratio_over_50 (DF_1)', 'DF_1+Ethnicity_Proportion (DF_2)', 'DF_2+imd_score']
         xgb_mae = [0.0549, 0.0499, 0.0521, 0.0528]
         xgb_r2 = [0.9230, 0.9326, 0.9286, 0.9282]
         lgb_mae = [0.0577, 0.0587, 0.0551, 0.0614]
@@ -378,7 +451,7 @@ class DataBase:
         plt.plot(dimensions, xgb_mae, marker='o', label='XGB MAE', color='blue')
         plt.plot(dimensions, lgb_mae, marker='o', label='LGB MAE', color='green')
 
-        plt.xlabel('Added socio-demographic variables')
+        plt.xlabel('The socio-demographic variables added to original data')
         plt.ylabel('MAE')
         plt.title('MAE value of XGB and LGB output')
         plt.legend(fontsize=12)
@@ -396,7 +469,7 @@ class DataBase:
         plt.plot(dimensions, xgb_r2, marker='o', label='XGB R squared', color='blue')
         plt.plot(dimensions, lgb_r2, marker='o', label='LGB R squared', color='green')
 
-        plt.xlabel('Dimension')
+        plt.xlabel('The socio-demographic variables added to original data')
         plt.ylabel('R squared')
         plt.title('R squared value of XGB and LGB prediction')
         plt.legend(fontsize=12)

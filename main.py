@@ -17,7 +17,8 @@ if __name__ == "__main__":
     # db.plot_imd('./data/london_LSOA/LSOA_2011_London_gen_MHW.shp')
 
     xgb = XGBModel.XGB(df_train, df_test, db.get_main_df())
-    xgb.train_xgb(is_date_split=False, is_spatial_split=True)  # record MAE: [0.0528]; R2: [0.9282] =>
+    # xgb.plot_split_df_table()
+    xgb.train_xgb(is_date_split=True, is_spatial_split=False)  # record MAE: [0.0528]; R2: [0.9282] =>
     # xgb_0_d [0.0549, 0.9230]
     # xgb_1_d [0.0499, 0.9326]
     # xgb_2_d [0.0521, 0.9286]
